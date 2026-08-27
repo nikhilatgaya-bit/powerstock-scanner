@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1"
+  >
+
+  <title>PowerStock Scanner</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100%;
+      background: #111827;
+      color: #ffffff;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 18px 10px;
+      text-align: center;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    header p {
+      margin: 6px 0 0;
+      font-size: 13px;
+      opacity: .75;
+    }
+
+    #scannerRegion {
+      width: 100%;
+      max-width: 520px;
+      margin: 12px auto 0;
+      padding: 0 12px;
+    }
+
+    #scannerRegion video {
+      width: 100% !important;
+      border-radius: 14px;
+    }
+
+    .box {
+      width: calc(100% - 24px);
+      max-width: 520px;
+      margin: 14px auto;
+      padding: 14px;
+      border-radius: 12px;
+      background: #1f2937;
+      text-align: center;
+    }
+
+    #status {
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    #result {
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #111827;
+      font-family: monospace;
+      font-size: 18px;
+      word-break: break-all;
+      display: none;
+    }
+
+    button {
+      width: calc(100% - 24px);
+      max-width: 520px;
+      margin: 8px auto;
+      display: block;
+      border: 0;
+      border-radius: 10px;
+      padding: 14px 18px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #doneBtn {
+      background: #f59e0b;
+      color: #111827;
+    }
+
+    #closeBtn {
+      background: #374151;
+      color: white;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .error {
+      color: #fca5a5;
+    }
+
+    .success {
+      color: #86efac;
+    }
+  </style>
+</head>
+
+<body>
+
+<header>
+  <h1>📷 PowerStock Scanner</h1>
+  <p id="modeText">Point the camera at a barcode.</p>
+</header>
+
+<div id="scannerRegion"></div>
+
+<div class="box">
+  <div id="status">
+    Starting camera...
+  </div>
+
+  <div id="result"></div>
+</div>
+
+<button id="doneBtn" class="hidden" onclick="finishScanning()">
+  ✓ Done scanning
+</button>
+
+<button id="closeBtn" onclick="closeScanner()">
+  ✕ Close scanner
+</button>
+
+<script>
+
+  var scanner = null;
+  var running = false;
+  var continuous = false;
+
+  var lastCode = '';
+  var lastTime = 0;
+
+  function getMode() {
+
+    var params = new URLSearchParams(window.location.search);
+
+    continuous = params.get('continuous') === '1';
+
+    return continuous;
+  }
+
+
+  function setStatus(message, type) {
+
+    var el = document.getElementById('status');
+
+    el.textContent = message;
+
+    el.className = '';
+
+    if (type) {
+      el.classList.add(type);
+    }
+  }
+
+
+  function showResult(code) {
+
+    var el = document.getElementById('result');
+
+    el.textContent = code;
+    el.style.display = 'block';
+  }
+
+
+  function sendCodeToPowerStock(code) {
+
+    if (!window.opener) {
+
+      setStatus(
+        'PowerStock window was not found. Close this page and open the scanner from PowerStock again.',
+        'error'
+      );
+
+      return;
+    }
+
+    window.opener.postMessage(
+      {
+        type: 'POWERSTOCK_SCAN',
+        code: code
+      },
+      '*'
+    );
+  }
+
+
+  function startScanner() {
+
+    if (typeof Html5Qrcode === 'undefined') {
+
+      setStatus(
+        'Scanner library could not be loaded. Check your internet connection.',
+        'error'
+      );
+
+      return;
+    }
+
+    try {
+
+      scanner = new Html5Qrcode('scannerRegion');
+
+    } catch (e) {
+
+      setStatus(
+        'Could not initialise scanner: ' + e.message,
+        'error'
+      );
+
+      return;
+    }
+
+
+    var config = {
+      fps: 10,
+
+      qrbox: {
+        width: 280,
+        height: 140
+      },
+
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.QR_CODE
+      ]
+    };
+
+
+    scanner.start(
+
+      {
+        facingMode: {
+          ideal: 'environment'
+        }
+      },
+
+      config,
+
+      function(decodedText) {
+
+        var code = String(decodedText || '').trim();
+
+        if (!code) {
+          return;
+        }
+
+
+        var now = Date.now();
+
+
+        // Prevent the same barcode from firing repeatedly.
+        if (
+          code === lastCode &&
+          (now - lastTime) < 2000
+        ) {
+          return;
+        }
+
+
+        lastCode = code;
+        lastTime = now;
+
+
+        showResult(code);
+
+
+        sendCodeToPowerStock(code);
+
+
+        if (continuous) {
+
+          setStatus(
+            'Scanned: ' + code +
+            '. Point at the next barcode.',
+            'success'
+          );
+
+        } else {
+
+          setStatus(
+            'Scanned successfully. Returning to PowerStock...',
+            'success'
+          );
+
+          setTimeout(function() {
+            closeScanner();
+          }, 400);
+
+        }
+
+      },
+
+      function() {
+        // Frame-by-frame decode failures are normal.
+      }
+
+    )
+
+    .then(function() {
+
+      running = true;
+
+      setStatus(
+        continuous
+          ? 'Scanning. Scan each serial one at a time.'
+          : 'Point the camera at the serial barcode.'
+      );
+
+    })
+
+    .catch(function(err) {
+
+      console.error('Camera error:', err);
+
+      var name = err && err.name
+        ? err.name
+        : '';
+
+      var message = err && err.message
+        ? err.message
+        : String(err);
+
+
+      if (name === 'NotAllowedError') {
+
+        setStatus(
+          'Camera permission was denied. Please allow camera access for this scanner site and try again.',
+          'error'
+        );
+
+      } else if (name === 'NotFoundError') {
+
+        setStatus(
+          'No camera was found on this device.',
+          'error'
+        );
+
+      } else if (name === 'NotReadableError') {
+
+        setStatus(
+          'The camera is currently being used by another application.',
+          'error'
+        );
+
+      } else {
+
+        setStatus(
+          'Could not start camera: ' +
+          name + ' — ' + message,
+          'error'
+        );
+
+      }
+
+    });
+  }
+
+
+  function finishScanning() {
+
+    closeScanner();
+
+  }
+
+
+  function closeScanner() {
+
+    if (scanner && running) {
+
+      scanner
+        .stop()
+        .catch(function() {})
+        .then(function() {
+
+          try {
+            scanner.clear();
+          } catch (e) {}
+
+          running = false;
+
+          window.close();
+
+        });
+
+    } else {
+
+      window.close();
+
+    }
+  }
+
+
+  // Receive scanner startup mode.
+  continuous = getMode();
+
+  if (continuous) {
+
+    document.getElementById('modeText').textContent =
+      'Continuous scanning — scan each serial one at a time.';
+
+    document.getElementById('doneBtn')
+      .classList.remove('hidden');
+
+  }
+
+
+  // Start only after the page has loaded.
+  window.addEventListener('load', function() {
+
+    startScanner();
+
+  });
+
+</script>
+
+</body>
+</html>
