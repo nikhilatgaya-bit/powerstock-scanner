@@ -302,24 +302,23 @@
 
 
         if (continuous) {
-
+        
           setStatus(
             'Scanned: ' + code +
             '. Point at the next barcode.',
             'success'
           );
-
+        
         } else {
-
+        
           setStatus(
-            'Scanned successfully. Returning to PowerStock...',
+            'Scanned successfully: ' + code,
             'success'
           );
-
-          setTimeout(function() {
-            closeScanner();
-          }, 400);
-
+        
+          document.getElementById('doneBtn')
+            .classList.remove('hidden');
+        
         }
 
       },
@@ -428,14 +427,19 @@
   continuous = getMode();
 
   if (continuous) {
-
+  
     document.getElementById('modeText').textContent =
       'Continuous scanning — scan each serial one at a time.';
-
-    document.getElementById('doneBtn')
-      .classList.remove('hidden');
-
+  
+  } else {
+  
+    document.getElementById('modeText').textContent =
+      'Scan a barcode, then press Done scanning.';
+  
   }
+  
+  document.getElementById('doneBtn')
+    .classList.remove('hidden');
 
 
   // Start only after the page has loaded.
